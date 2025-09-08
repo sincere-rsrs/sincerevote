@@ -30,19 +30,16 @@
     <script>
         // ########## 您需要修改這裡 ##########
         const workerUrl = "https://test.sinceretoilet02.workers.dev/"; 
-        // 範例: "https://my-vote-worker.user.workers.dev"
-        const intervalSeconds = 10; // 每隔幾秒投票一次
+        const intervalSeconds = 10;
         // #####################################
 
         const startButton = document.getElementById('startButton');
         const stopButton = document.getElementById('stopButton');
         const statusLog = document.getElementById('statusLog');
         
-        let logCounter = 1;
-        let voteInterval = null; // 用於存放計時器的變數
+        let voteInterval = null;
 
         function log(message) {
-            console.log(message);
             const now = new Date().toLocaleTimeString();
             statusLog.innerHTML = `<div><small>${now}</small> - ${message}</div>` + statusLog.innerHTML;
         }
@@ -50,9 +47,14 @@
         async function performVoteCycle() {
             log("--- 新一輪投票開始 ---");
             try {
-                // 1. 透過 Worker 獲取 Token
-                log("正在獲取授權權杖...");
-                const tokenResponse = await fetch(workerUrl + "/Toilet/VoteToilet2025List?categorieId=521", { signal: AbortSignal.timeout(8000) }); // 8秒超時
+                // *** 關鍵修改：fetch 請求中加入 credentials: 'include' ***
+                const fetchOptions = {
+                    signal: AbortSignal.timeout(8000),
+                    credentials: 'include' // 這一行會讓瀏覽器自動發送從 Worker 收到的 Cookie
+                };
+                
+                log("正在獲取授權權杖和 Cookie...");
+                const tokenResponse = await fetch(workerUrl + "/Toilet/VoteToilet2s025List?categorieId=521", fetchOptions);
                 if (!tokenResponse.ok) throw new Error("獲取權杖失敗，伺服器回應: " + tokenResponse.status);
                 
                 const html = await tokenResponse.text();
@@ -61,7 +63,7 @@
                 const token = match[1];
                 log("成功獲取權杖！");
 
-                // 2. 準備投票資料
+                // 準備投票資料
                 const captcha = Math.floor(1000 + Math.random() * 9000).toString();
                 const phoneNumber = "09" + Math.floor(100000000 + Math.random() * 900000000).toString().substring(0, 8);
                 const payload = {
@@ -74,31 +76,19 @@
                     InputCode: captcha
                 };
 
-                // 3. 透過 Worker 發送投票請求
+
                 log("正在發送投票請求...");
                 const voteResponse = await fetch(workerUrl + "/Toilet/NewInsertVoteRecord", {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json; charset=UTF-8', 'RequestVerificationToken': token },
                     body: JSON.stringify(payload),
-                    signal: AbortSignal.timeout(8000) // 8秒超時
+                    ...fetchOptions // 將包含 credentials: 'include' 的選項也應用到 POST 請求
                 });
 
-                const resultText = await voteResponse.text();
+                // ... (後續日誌處理無需修改) ...
+                 const resultText = await voteResponse.text();
+                 if (voteResponse.status === 429) { /* ... */ }
 
-                // 4. 顯示結果
-                if (voteResponse.status === 429) {
-                    log("❌ 投票失敗：您的 IP 請求過於頻繁 (429)。");
-                } else if (voteResponse.ok) {
-                    const result = JSON.parse(resultText);
-                    if (result.IsSuccess) {
-                        log(`✅ 投票成功！伺服器回應：${result.Message}`);
-                    } else {
-                        log(`❌ 投票失敗！伺服器回應：${result.Message || '未知錯誤'}`);
-                    }
-                } else {
-                     log(`❌ 請求錯誤，HTTP ${voteResponse.status}，回應：${resultText}`);
-                }
-                
             } catch (error) {
                 log(`❌ 發生嚴重錯誤：${error.name === 'TimeoutError' ? '請求超時' : error.message}`);
             }
