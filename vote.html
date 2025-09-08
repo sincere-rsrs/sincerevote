@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>績優公廁投票</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background-color: #f0f2f5; }
+        .container { text-align: center; background: white; padding: 40px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        h1 { color: #333; }
+        .buttons { display: flex; gap: 10px; justify-content: center; }
+        button { border: none; padding: 15px 30px; font-size: 18px; border-radius: 5px; cursor: pointer; transition: background-color 0.3s; }
+        #startButton { background-color: #28a745; color: white; }
+        #stopButton { background-color: #dc3545; color: white; }
+        button:disabled { background-color: #cccccc; cursor: not-allowed; }
+        #statusLog { margin-top: 20px; text-align: left; background-color: #f8f9fa; border: 1px solid #dee2e6; padding: 15px; border-radius: 5px; min-height: 100px; max-height: 300px; overflow-y: auto; font-family: "Courier New", monospace; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>績優公廁投票</h1>
+        <p>點擊「開始」後，網頁將每 10 秒自動投票一次。<br>您可以隨時點擊「停止」，或直接關閉網頁。</p>
+        <div class="buttons">
+            <button id="startButton">開始自動投票</button>
+            <button id="stopButton" disabled>停止</button>
+        </div>
+        <div id="statusLog">日誌將顯示於此...</div>
+    </div>
+
+    <script>
+        // ########## 您需要修改這裡 ##########
+        const workerUrl = "https://test.sinceretoilet02.workers.dev/"; 
+        // 範例: "https://my-vote-worker.user.workers.dev"
+        const intervalSeconds = 10; // 每隔幾秒投票一次
+        // #####################################
+
+        const startButton = document.getElementById('startButton');
+        const stopButton = document.getElementById('stopButton');
+        const statusLog = document.getElementById('statusLog');
+        
+        let logCounter = 1;
+        let voteInterval = null; // 用於存放計時器的變數
+
+        function log(message) {
+            console.log(message);
+            const now = new Date().toLocaleTimeString();
+            statusLog.innerHTML = `<div><small>${now}</small> - ${message}</div>` + statusLog.innerHTML;
+        }
+
+        async function performVoteCycle() {
+            log("--- 新一輪投票開始 ---");
+            try {
+                // 1. 透過 Worker 獲取 Token
+                log("正在獲取授權權杖...");
+                const tokenResponse = await fetch(workerUrl + "/Toilet/VoteToilet2025List?categorieId=521", { signal: AbortSignal.timeout(8000) }); // 8秒超時
+                if (!tokenResponse.ok) throw new Error("獲取權杖失敗，伺服器回應: " + tokenResponse.status);
+                
+                const html = await tokenResponse.text();
+                const match = html.match(/<input name="__RequestVerificationToken" type="hidden" value="([^"]+)" \/>/);
+                if (!match || !match[1]) throw new Error("在頁面中找不到權杖。");
+                const token = match[1];
+                log("成功獲取權杖！");
+
+                // 2. 準備投票資料
+                const captcha = Math.floor(1000 + Math.random() * 9000).toString();
+                const phoneNumber = "09" + Math.floor(100000000 + Math.random() * 900000000).toString().substring(0, 8);
+                const payload = {
+                    name: "信實集團",
+                    email: "sincere" + Date.now() + "@sincere-group.com.tw",
+                    cellphone: phoneNumber,
+                    gender: "2",
+                    articleId: 497,
+                    ValidateCode: captcha,
+                    InputCode: captcha
+                };
+
+                // 3. 透過 Worker 發送投票請求
+                log("正在發送投票請求...");
+                const voteResponse = await fetch(workerUrl + "/Toilet/NewInsertVoteRecord", {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json; charset=UTF-8', 'RequestVerificationToken': token },
+                    body: JSON.stringify(payload),
+                    signal: AbortSignal.timeout(8000) // 8秒超時
+                });
+
+                const resultText = await voteResponse.text();
+
+                // 4. 顯示結果
+                if (voteResponse.status === 429) {
+                    log("❌ 投票失敗：您的 IP 請求過於頻繁 (429)。");
+                } else if (voteResponse.ok) {
+                    const result = JSON.parse(resultText);
+                    if (result.IsSuccess) {
+                        log(`✅ 投票成功！伺服器回應：${result.Message}`);
+                    } else {
+                        log(`❌ 投票失敗！伺服器回應：${result.Message || '未知錯誤'}`);
+                    }
+                } else {
+                     log(`❌ 請求錯誤，HTTP ${voteResponse.status}，回應：${resultText}`);
+                }
+                
+            } catch (error) {
+                log(`❌ 發生嚴重錯誤：${error.name === 'TimeoutError' ? '請求超時' : error.message}`);
+            }
+        }
+
+        // 當點擊「開始」按鈕
+        startButton.addEventListener('click', () => {
+            startButton.disabled = true;
+            stopButton.disabled = false;
+            log(`測試已啟動，將每 ${intervalSeconds} 秒執行一次。`);
+
+            // 立刻執行第一次
+            performVoteCycle(); 
+            
+            // 設定計時器，之後每隔 intervalSeconds 秒執行一次
+            voteInterval = setInterval(performVoteCycle, intervalSeconds * 1000);
+        });
+
+        // 當點擊「停止」按鈕
+        stopButton.addEventListener('click', () => {
+            if (voteInterval) {
+                clearInterval(voteInterval); // 清除計時器
+                voteInterval = null;
+                startButton.disabled = false;
+                stopButton.disabled = true;
+                log("測試已手動停止。");
+            }
+        });
+    </script>
+</body>
+</html>
