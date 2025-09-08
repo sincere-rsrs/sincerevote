@@ -29,7 +29,7 @@
 
     <script>
         // ########## 您需要修改這裡 ##########
-        const workerUrl = "https://test.sinceretoilet02.workers.dev"; // 確保網址結尾沒有斜線
+        const workerUrl = "https://test.sinceretoilet02.workers.dev";
         const intervalSeconds = 10;
         // #####################################
 
@@ -46,14 +46,17 @@
 
         async function performVoteCycle() {
             log("--- 新一輪投票開始 ---");
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 8000); // 8秒超時
+
             try {
-                // *** 關鍵修改：fetch 請求中加入 withCredentials: true ***
-                // 在新版的 Worker 中，我們改用 withCredentials 而不是 credentials: 'include' 來處理 Cookie
+                // *** 關鍵修改：所有 fetch 請求都帶上 credentials: 'include' ***
+                // 這會讓瀏覽器自動處理 Cookie 的發送與接收
                 const fetchOptions = {
-                    signal: AbortSignal.timeout(8000), // 8秒超時
+                    signal: controller.signal,
+                    credentials: 'include' 
                 };
                 
-                // *** 致命錯誤修正：VoteToilet2025List ***
                 log("正在獲取授權權杖和 Cookie...");
                 const tokenResponse = await fetch(`${workerUrl}/Toilet/VoteToilet2025List?categorieId=521`, fetchOptions);
 
@@ -109,7 +112,9 @@
                 }
                 
             } catch (error) {
-                log(`❌ 發生嚴重錯誤：${error.name === 'TimeoutError' ? '請求超時' : error.message}`);
+                log(`❌ 發生嚴重錯誤：${error.name === 'AbortError' ? '請求超時' : error.message}`);
+            } finally {
+                clearTimeout(timeoutId);
             }
         }
 
